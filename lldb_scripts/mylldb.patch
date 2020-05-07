@@ -1,0 +1,105 @@
+Author: 1wc <liwc1996iie@gmail.com>
+diff --git a/lldbinit.py b/lldbinit.py
+index de7c933..0f13e61 100644
+--- a/lldbinit.py
++++ b/lldbinit.py
+@@ -285,6 +285,8 @@ def __lldb_init_module(debugger, internal_dict):
+     ci.HandleCommand("command script add -f lldbinit.cmd_show_header show_header", res)
+     ci.HandleCommand("command script add -f lldbinit.cmd_tester tester", res)
+     ci.HandleCommand("command script add -f lldbinit.cmd_datawin datawin", res)
++
++    ci.HandleCommand("command script add -f lldbinit.cmd_start start", res)
+     # shortcut command to modify registers content
+     if CONFIG_ENABLE_REGISTER_SHORTCUTS == 1:
+         # x64
+@@ -352,6 +354,7 @@ def cmd_lldbinitcmds(debugger, command, result, dict):
+     [ "bpn", "temporarly breakpoint next instruction" ],
+     [ "break_entrypoint", "launch target and stop at entrypoint" ],
+     [ "skip", "skip current instruction" ],
++    [ "start", "start target" ],
+     [ "int3", "patch memory address with INT3" ],
+     [ "rint3", "restore original byte at address patched with INT3" ],
+     [ "listint3", "list all INT3 patched addresses" ],
+@@ -567,12 +570,12 @@ def output(x):
+ # ---------------------------
+ 
+ # temporary software breakpoint
+-def cmd_bpt(debugger, command, result, dict):
++def cmd_bpt(debugger, command, exe_ctx, result, dict):
+     '''Set a temporary software breakpoint. Use \'bpt help\' for more information.'''
+     help = """
+ Set a temporary software breakpoint.
+ 
+-Syntax: bpt <address>
++Syntax: bpt <address or mods>
+ 
+ Note: expressions supported, do not use spaces between operators.
+ """
+@@ -586,8 +589,8 @@ Note: expressions supported, do not use spaces between operators.
+     if cmd[0] == "help":
+         print(help)
+         return
+-    
+-    value = evaluate(cmd[0])
++
++    value = evaluate(eval_mod_name(cmd[0], exe_ctx))
+     if value == None:
+         print("[-] error: invalid input value.")
+         print("")
+@@ -600,7 +603,7 @@ Note: expressions supported, do not use spaces between operators.
+     breakpoint.SetThreadID(get_frame().GetThread().GetThreadID())
+ 
+     print("[+] Set temporary breakpoint at 0x{:x}".format(value))
+-    
++
+ # hardware breakpoint
+ def cmd_bhb(debugger, command, result, dict):
+     '''Set an hardware breakpoint'''
+@@ -4149,6 +4152,47 @@ def get_objectivec_selector(src_addr):
+     
+     return ""
+ 
++def get_mods(exe_ctx):
++    global loaded_mods
++    loaded_mods = {}
++    target = exe_ctx.GetTarget()
++    for mod in target.get_modules_array():
++        loaded_mods[mod.file.basename.lower()] = mod.GetObjectFileHeaderAddress().GetLoadAddress(target)
++    return loaded_mods
++
++def eval_mod_name(expr, exe_ctx):
++    import shlex
++    mods = get_mods(exe_ctx)
++    lexer = shlex.shlex(expr)
++    lexer.wordchars = lexer.wordchars + (".")
++    final_expr = ""
++    for token in lexer:
++        if token.lower() in mods:
++            final_expr += str(mods[token]) # mod => addr
++        else:
++            final_expr += str(token) # addr
++    return final_expr
++
++def cmd_start(debugger, command, exe_ctx, result, dict):
++    '''Start command like gdb'''
++    help = """
++Start the target like gdb!!!
++
++Syntax: start [args]
++"""
++    cmd = command.split()
++    if len(cmd) > 0 and cmd[0] == "help":
++        print(help)
++        return
++    target = get_target()
++    breakpoint = target.BreakpointCreateByName("main")
++    breakpoint.SetOneShot(True)
++
++    debugger.SetAsync(True)
++    res = lldb.SBCommandReturnObject()
++    process = lldb.debugger.GetSelectedTarget().LaunchSimple(command.split(), None, os.getcwd())
++    result.SetStatus(lldb.eReturnStatusSuccessFinishNoResult)
++
+ # ------------------------------------------------------------
+ # The heart of lldbinit - when lldb stop this is where we land 
+ # ------------------------------------------------------------
